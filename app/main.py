@@ -1,9 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import pdf
 
-app = FastAPI(title="Photoship API")
+app = FastAPI(title="TTLM API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,7 +13,6 @@ app.add_middleware(
 )
 
 
-app.include_router(pdf.router)
 
 @app.get("/health")
 async def health_check():
