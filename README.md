@@ -1,16 +1,29 @@
-# Photoship Python API
+# TTLM (Talk to Language Model)
 
-Python API for the Photoship project using FastAPI.
+A git-based knowledge assistant that uses RAG (Retrieval Augmented Generation) to help you query your codebase and documentation.
 
-## Setup
+## Quick Start
 
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+1. Activate the virtual environment:
+   ```bash
+   source venv/bin/activate  # Unix/MacOS
+   # or
+   .\venv\Scripts\activate  # Windows
+   ```
 
-# Install dependencies
-pip install -r requirements.txt
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-# Run development server
-uvicorn app.main:app --reload
+3. Run the application:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+
+4. Visit http://localhost:8000 in your browser
+
+
+## License
+
+MIT

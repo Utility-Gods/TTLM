@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TTLM Chat</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/hyperscript.org@0.9.12"></script>
+    <link href="/static/styles.css" rel="stylesheet">
+</head>
+<body>
+    <div class="chat-container">
+        <div id="messages" class="messages">
+            <!-- Messages will be inserted here -->
+        </div>
+        
+        <form hx-post="/chat" 
+              hx-target="#messages" 
+              hx-swap="beforeend"
+              _="on submit target.reset()">
+            <textarea name="message" 
+                      placeholder="Ask about your code..."
+                      _="on keydown[key=='Enter' && !shiftKey] halt the event call submit() on closest <form/>">
+            </textarea>
+            <button type="submit">Send</button>
+        </form>
+    </div>
+</body>
+</html>
