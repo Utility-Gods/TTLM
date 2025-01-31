@@ -1,4 +1,6 @@
-# app/main.py
+from dotenv import load_dotenv
+
+
 from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -14,19 +16,38 @@ from typing import Optional
 import logging
 
 
+load_dotenv()
+
+
 from .git.manager import GitManager
 from .git.exceptions import RepositoryValidationError
-app = FastAPI()
+from .db.main import init_db, close_db
+
+
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-
-# We'll store the active model name in memory for this simple implementation
-# In a production app, you might want to use a proper state management solution
 OLLAMA_BASE_URL = "http://localhost:11434"
 ACTIVE_MODEL = "qwen2.5-coder:7b-instruct-q8_0"
 
+
+
+app = FastAPI()
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+
+@app.on_event("startup")
+async def startup():
+    await init_db()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await close_db()
+
+
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 async def get_ollama_models() -> List[Dict]:
