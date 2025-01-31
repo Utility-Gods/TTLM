@@ -1,29 +1,27 @@
-from dotenv import load_dotenv
-
-
-from fastapi import FastAPI, Request, Form
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import httpx
-from pathlib import Path
-from typing import List, Dict
 import json
-
-from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.templating import Jinja2Templates
-from typing import Optional
 import logging
+from pathlib import Path
+from typing import Dict, List
 
+import httpx
+from dotenv import load_dotenv
+from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from .models.project import ProjectCreate
 
 load_dotenv()
 
 
-from .git.manager import GitManager
+from .db.init import close_db, init_db
 from .git.exceptions import RepositoryValidationError
-from .db.main import init_db, close_db
+from .git.manager import GitManager
+from .models.project import ProjectCreate
+from .db.project import create_project, get_all_projects
 
-
+logger = logging.getLogger(__name__)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,20 +29,18 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 ACTIVE_MODEL = "qwen2.5-coder:7b-instruct-q8_0"
 
 
-
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-
 
 
 @app.on_event("startup")
 async def startup():
     await init_db()
 
+
 @app.on_event("shutdown")
 async def shutdown():
     await close_db()
-
 
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -67,6 +63,7 @@ async def get_ollama_models() -> List[Dict]:
             print(f"Error fetching models: {e}")
             return []
 
+
 @app.get("/")
 async def root(request: Request):
     """
@@ -74,14 +71,12 @@ async def root(request: Request):
     so users can see and select from installed models immediately upon loading.
     """
     models = await get_ollama_models()
+    projects= await get_all_projects()
     return templates.TemplateResponse(
         "index.html",
-        {
-            "request": request,
-            "models": models,
-            "active_model": ACTIVE_MODEL
-        }
+        {"request": request, "models": models, "active_model": ACTIVE_MODEL, "projects": projects},
     )
+
 
 @app.post("/set-model")
 async def set_model(request: Request):
@@ -97,10 +92,7 @@ async def set_model(request: Request):
             ACTIVE_MODEL = model_name
             return templates.TemplateResponse(
                 "partials/model_status.html",
-                {
-                    "request": request,
-                    "active_model": ACTIVE_MODEL
-                }
+                {"request": request, "active_model": ACTIVE_MODEL},
             )
     except Exception as e:
         return HTMLResponse(f"Error setting model: {str(e)}", status_code=500)
@@ -116,46 +108,45 @@ async def chat(request: Request):
         # Get the message from form data
         form = await request.form()
         message = form.get("message", "")
-        
+
         if not message or message.isspace():
             return templates.TemplateResponse(
                 "partials/error.html",
-                {
-                    "request": request,
-                    "error": "Please enter a message"
-                },
-                status_code=400
+                {"request": request, "error": "Please enter a message"},
+                status_code=400,
             )
 
         # Initialize response accumulator
         full_response = ""
-        
+
         # Make request to Ollama
         async with httpx.AsyncClient() as client:
-            async with client.stream('POST', f"{OLLAMA_BASE_URL}/api/generate", 
+            async with client.stream(
+                "POST",
+                f"{OLLAMA_BASE_URL}/api/generate",
                 json={
                     "model": ACTIVE_MODEL,
                     "prompt": message,
-                    "stream": True  # Enable streaming
-                }
+                    "stream": True,  # Enable streaming
+                },
             ) as response:
                 # Process the streaming response
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
-                        
+
                     try:
                         # Parse each line as a separate JSON object
                         chunk = json.loads(line)
-                        
+
                         # Extract the response text from the chunk
                         if "response" in chunk:
                             full_response += chunk["response"]
-                            
+
                         # Check if this is the final message
                         if chunk.get("done", False):
                             break
-                            
+
                     except json.JSONDecodeError as e:
                         print(f"Error parsing chunk: {line}")
                         print(f"Error details: {str(e)}")
@@ -167,19 +158,16 @@ async def chat(request: Request):
             {
                 "request": request,
                 "message": full_response.strip(),
-                "model": ACTIVE_MODEL
-            }
+                "model": ACTIVE_MODEL,
+            },
         )
 
     except Exception as e:
         print(f"Error processing chat: {str(e)}")
         return templates.TemplateResponse(
             "partials/error.html",
-            {
-                "request": request,
-                "error": f"Failed to process message: {str(e)}"
-            },
-            status_code=500
+            {"request": request, "error": f"Failed to process message: {str(e)}"},
+            status_code=500,
         )
 
 
@@ -196,52 +184,49 @@ async def select_project(request: Request):
             "partials/project_dialog.html",
             {
                 "request": request,
-            }
+            },
         )
     except Exception as e:
         print(f"Error displaying project selection: {e}")
         return templates.TemplateResponse(
             "partials/error.html",
-            {
-                "request": request,
-                "error": "Failed to load project selection dialog"
-            },
-            status_code=500
+            {"request": request, "error": "Failed to load project selection dialog"},
+            status_code=500,
         )
 
-# Initialize GitManager with a workspace directory
+
 git_manager = GitManager("./workspace")
 
+
 @app.post("/analyze-project")
-async def analyze_project(
-    request: Request,
-    background_tasks: BackgroundTasks
-):
-    """
-    Handle repository initialization and analysis.
-    Supports both local paths and remote Git URLs.
-    """
+async def analyze_project(request: Request, background_tasks: BackgroundTasks):
     try:
         form = await request.form()
-        repo_source = form.get("repo_path")
-        
-        if not repo_source:
+        repo_path = form.get("repo_path")
+
+        if not repo_path:
             return templates.TemplateResponse(
                 "partials/error.html",
-                {
-                    "request": request,
-                    "error": "Repository path or URL is required"
-                },
-                status_code=400
+                {"request": request, "error": "Repository path or URL is required"},
+                status_code=400,
             )
 
         # Initialize repository
-        repo_info = await git_manager.initialize_repository(repo_source)
-       
-        print(repo_info)
+        repo_info = await git_manager.initialize_repository(repo_path)
+
+        # Create project in database
+        project_data = ProjectCreate(
+            name=repo_info.name,
+            repo_url=repo_path
+            if git_manager.is_git_url(repo_path)
+            else str(Path(repo_path).absolute()),
+            description=None,  # Can be added later
+        )
+        project_id = await create_project(project_data)
+
         # Get initial file tree
-        files = await git_mananager.get_file_tree()
-        
+        files = await git_manager.get_file_tree()
+
         # Add cleanup to background tasks for remote repositories
         if not repo_info.is_local:
             background_tasks.add_task(git_manager.cleanup)
@@ -255,23 +240,19 @@ async def analyze_project(
                 "message": f"Repository initialized successfully: {repo_info.name}",
                 "details": {
                     "name": repo_info.name,
+                    "id": project_id,
                     "default_branch": repo_info.default_branch,
                     "commit_count": repo_info.commit_count,
                     "branch_count": repo_info.branch_count,
-                    "file_count": len(files)
-                }
-            }
+                    "file_count": len(files),
+                },
+            },
         )
-
     except RepositoryValidationError as e:
-        logger.error(f"Repository validation error: {str(e)}")
         return templates.TemplateResponse(
             "partials/error.html",
-            {
-                "request": request,
-                "error": str(e)
-            },
-            status_code=400
+            {"request": request, "error": str(e)},
+            status_code=400,
         )
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
@@ -279,7 +260,7 @@ async def analyze_project(
             "partials/error.html",
             {
                 "request": request,
-                "error": "An unexpected error occurred while analyzing the repository"
+                "error": "An unexpected error occurred while analyzing the repository",
             },
-            status_code=500
+            status_code=500,
         )

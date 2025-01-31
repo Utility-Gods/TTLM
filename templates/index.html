@@ -57,7 +57,30 @@
 
     <!-- Main Content -->
     <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
-
+    <div class="w-64 bg-white shadow-sm">
+        <div class="p-4">
+            <h2 class="text-lg font-semibold text-gray-900">Projects</h2>
+            <div class="mt-4 space-y-2">
+                {% for project in projects %}
+                <div class="p-3 rounded-md hover:bg-gray-50">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-sm font-medium text-gray-900">{{ project.name }}</h3>
+                            <p class="text-xs text-gray-500 truncate">{{ project.repo_url }}</p>
+                        </div>
+                        <div class="h-2 w-2 rounded-full bg-green-500"></div>
+                    </div>
+                </div>
+                {% endfor %}
+                
+                {% if not projects %}
+                <div class="text-sm text-gray-500 text-center py-4">
+                    No projects yet
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
  <div class="flex justify-between items-start">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-900">Project Selection</h2>
