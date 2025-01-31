@@ -1,17 +1,12 @@
-from git import Repo, GitCommandError
+from git import Repo 
 from pathlib import Path
-from dataclasses import dataclass
-from typing import List, Dict, Optional, Union
-import hashlib
+from typing import List, Dict,  Union
 from datetime import datetime
 import tempfile
 import shutil
 import logging
 import os
 import re
-from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.templating import Jinja2Templates
-from typing import Optional
 import logging
 
 

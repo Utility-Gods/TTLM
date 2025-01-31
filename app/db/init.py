@@ -1,10 +1,8 @@
 from asyncpg.pool import Pool
 import asyncpg
 import os
-from dotenv import load_dotenv
 
 
-# Database connection parameters
 DB_CONFIG = {
     'database': os.getenv('DB_NAME'),
     'user': os.getenv('DB_USER'),
@@ -15,7 +13,6 @@ DB_CONFIG = {
 
 print(DB_CONFIG)
 
-# Global pool variable
 pool: Pool = None
 
 async def init_db():

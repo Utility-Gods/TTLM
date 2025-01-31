@@ -200,6 +200,7 @@ git_manager = GitManager("./workspace")
 async def analyze_project(request: Request, background_tasks: BackgroundTasks):
     try:
         form = await request.form()
+        print(form)
         repo_path = form.get("repo_path")
 
         if not repo_path:
@@ -225,6 +226,7 @@ async def analyze_project(request: Request, background_tasks: BackgroundTasks):
         # Get initial file tree
         files = await git_manager.get_file_tree()
 
+        print(files)
         # Add cleanup to background tasks for remote repositories
         if not repo_info.is_local:
             background_tasks.add_task(git_manager.cleanup)
