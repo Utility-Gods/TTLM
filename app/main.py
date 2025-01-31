@@ -8,6 +8,14 @@ from pathlib import Path
 from typing import List, Dict
 import json
 
+from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi.templating import Jinja2Templates
+from typing import Optional
+import logging
+
+
+from .git.manager import GitManager
+from .git.exceptions import RepositoryValidationError
 app = FastAPI()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -180,59 +188,77 @@ async def select_project(request: Request):
             status_code=500
         )
 
+# Initialize GitManager with a workspace directory
+git_manager = GitManager("./workspace")
+
 @app.post("/analyze-project")
-async def analyze_project(request: Request):
+async def analyze_project(
+    request: Request,
+    background_tasks: BackgroundTasks
+):
     """
-    Handle project analysis initiation.
-    Takes a repository path and begins the analysis process.
+    Handle repository initialization and analysis.
+    Supports both local paths and remote Git URLs.
     """
     try:
         form = await request.form()
-        repo_path = form.get("repo_path")
+        repo_source = form.get("repo_path")
         
-        if not repo_path:
+        if not repo_source:
             return templates.TemplateResponse(
                 "partials/error.html",
                 {
                     "request": request,
-                    "error": "Repository path is required"
+                    "error": "Repository path or URL is required"
                 },
                 status_code=400
             )
 
-        # Initialize Git manager
-        from .git_manager import GitManager
-        git_manager = GitManager(repo_path)
+        # Initialize repository
+        repo_info = await git_manager.initialize_repository(repo_source)
+       
+        print(repo_info)
+        # Get initial file tree
+        files = await git_mananager.get_file_tree()
         
-        if not git_manager.initialize_repo():
-            return templates.TemplateResponse(
-                "partials/error.html",
-                {
-                    "request": request,
-                    "error": "Invalid Git repository path"
-                },
-                status_code=400
-            )
+        # Add cleanup to background tasks for remote repositories
+        if not repo_info.is_local:
+            background_tasks.add_task(git_manager.cleanup)
 
-        # Return initial status while analysis continues in background
-        # We'll enhance this with background tasks later
         return templates.TemplateResponse(
             "partials/project_status.html",
             {
                 "request": request,
-                "repo_path": repo_path,
-                "status": "initializing",
-                "message": "Beginning repository analysis..."
+                "repo_path": str(repo_info.path),
+                "status": "initialized",
+                "message": f"Repository initialized successfully: {repo_info.name}",
+                "details": {
+                    "name": repo_info.name,
+                    "default_branch": repo_info.default_branch,
+                    "commit_count": repo_info.commit_count,
+                    "branch_count": repo_info.branch_count,
+                    "file_count": len(files)
+                }
             }
         )
 
-    except Exception as e:
-        print(f"Error analyzing project: {e}")
+    except RepositoryValidationError as e:
+        logger.error(f"Repository validation error: {str(e)}")
         return templates.TemplateResponse(
             "partials/error.html",
             {
                 "request": request,
-                "error": f"Failed to analyze project: {str(e)}"
+                "error": str(e)
+            },
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {
+                "request": request,
+                "error": "An unexpected error occurred while analyzing the repository"
             },
             status_code=500
         )
