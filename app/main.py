@@ -197,12 +197,11 @@ git_manager = GitManager("./workspace")
 
 
 @app.post("/analyze-project")
-async def analyze_project(request: Request, background_tasks: BackgroundTasks):
+async def analyze_project(request: Request):
     try:
         form = await request.form()
-        print(form)
         repo_path = form.get("repo_path")
-
+        
         if not repo_path:
             return templates.TemplateResponse(
                 "partials/error.html",
@@ -210,27 +209,38 @@ async def analyze_project(request: Request, background_tasks: BackgroundTasks):
                 status_code=400,
             )
 
-        # Initialize repository
+        # Initialize repository - now persistent
         repo_info = await git_manager.initialize_repository(repo_path)
-
-        # Create project in database
+        
+        # Create project in database with git-specific info
         project_data = ProjectCreate(
             name=repo_info.name,
-            repo_url=repo_path
-            if git_manager.is_git_url(repo_path)
-            else str(Path(repo_path).absolute()),
-            description=None,  # Can be added later
+            repo_url=repo_path,
+            repo_path=str(repo_info.path),  # Store the actual path where git data lives
+            default_branch=repo_info.default_branch,
+            current_branch=repo_info.default_branch,
+            last_commit=repo_info.last_commit,
+            description=None,
         )
         project_id = await create_project(project_data)
-
-        # Get initial file tree
+        
+        # Get initial file tree using Git's internal structure
         files = await git_manager.get_file_tree()
-
-        print(files)
-        # Add cleanup to background tasks for remote repositories
-        if not repo_info.is_local:
-            background_tasks.add_task(git_manager.cleanup)
-
+        
+        # Get additional git metadata
+        file_history_sample = []
+        try:
+            # Get history of first 3 files as a sample
+            for file in files[:3]:
+                history = await git_manager.get_file_history(file['path'])
+                file_history_sample.append({
+                    'path': file['path'],
+                    'commits': len(history),
+                    'last_modified': history[0]['date'] if history else None
+                })
+        except Exception as e:
+            logger.warning(f"Could not fetch file history: {e}")
+        
         return templates.TemplateResponse(
             "partials/project_status.html",
             {
@@ -242,9 +252,11 @@ async def analyze_project(request: Request, background_tasks: BackgroundTasks):
                     "name": repo_info.name,
                     "id": project_id,
                     "default_branch": repo_info.default_branch,
+                    "current_commit": repo_info.last_commit,
                     "commit_count": repo_info.commit_count,
                     "branch_count": repo_info.branch_count,
                     "file_count": len(files),
+                    "file_samples": file_history_sample
                 },
             },
         )
