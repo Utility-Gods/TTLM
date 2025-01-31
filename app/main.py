@@ -14,6 +14,7 @@ async def root(request: Request):
 async def chat(request: Request):
     body = await request.json()
     message = body.get("message")
+    print(message)
     return templates.TemplateResponse(
         "partials/message.html", 
         {"request": request, "message": message}
