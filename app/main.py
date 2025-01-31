@@ -4,90 +4,91 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import httpx
-import json
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import List, Dict
+import json
 
 app = FastAPI()
 
-# Setup for templates and static files
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
-# Configuration for Ollama with Qwen2.5 Coder
+# We'll store the active model name in memory for this simple implementation
+# In a production app, you might want to use a proper state management solution
 OLLAMA_BASE_URL = "http://localhost:11434"
-MODEL_NAME = "qwen2.5-coder:7b-instruct-q8_0"
+ACTIVE_MODEL = "qwen2.5-coder:7b-instruct-q8_0"
 
-async def generate_code_response(message: str) -> AsyncGenerator[str, None]:
+
+
+async def get_ollama_models() -> List[Dict]:
     """
-    Generates responses using Qwen2.5 Coder model. The function is structured to:
-    1. Format the prompt to get the best results from the model
-    2. Stream the response back in chunks
-    3. Handle any errors gracefully
+    Fetches available models from Ollama's API. This function makes an HTTP request
+    to Ollama's local API endpoint and processes the response to get model information.
     """
-    async with httpx.AsyncClient(timeout=30.0) as client:  # Increased timeout for longer responses
+    async with httpx.AsyncClient() as client:
         try:
-            # Format the prompt to get more focused coding responses
-            formatted_prompt = f"""Please help with the following coding question or task. 
-            Provide clear, well-commented code and explain your solution.
+            response = await client.get("http://localhost:11434/api/tags")
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                # Sort models by name for better presentation
+                return sorted(models, key=lambda x: x["name"])
+            return []
+        except Exception as e:
+            print(f"Error fetching models: {e}")
+            return []
 
-            Question/Task: {message}
-
-            Response:"""
-
-            url = f"{OLLAMA_BASE_URL}/api/generate"
-            data = {
-                "model": MODEL_NAME,
-                "prompt": formatted_prompt,
-                "stream": True,
-                # Optional parameters you might want to tune:
-                # "temperature": 0.7,
-                # "top_p": 0.9,
-                # "top_k": 40,
-            }
-
-            async with client.stream('POST', url, json=data) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line:
-                        try:
-                            chunk = json.loads(line)
-                            if 'response' in chunk:
-                                yield chunk['response']
-                            # Check if we're done generating
-                            if chunk.get('done', False):
-                                break
-                        except json.JSONDecodeError:
-                            continue
-
-        except httpx.HTTPError as exc:
-            yield f"Error communicating with the model: {str(exc)}"
-        except Exception as exc:
-            yield f"Unexpected error: {str(exc)}"
-
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def root(request: Request):
+    """
+    Renders the main page. We fetch available models and pass them to the template
+    so users can see and select from installed models immediately upon loading.
+    """
+    models = await get_ollama_models()
     return templates.TemplateResponse(
         "index.html",
-        {"request": request}
+        {
+            "request": request,
+            "models": models,
+            "active_model": ACTIVE_MODEL
+        }
     )
 
-@app.post("/chat")
-async def chat(
-    request: Request,
-    message: str = Form(...)
-):
+@app.post("/set-model")
+async def set_model(request: Request):
     """
-    Handles chat messages by sending them to the Qwen2.5 Coder model and returning the response.
-    This function:
-    1. Validates the input
-    2. Sends it to the model
-    3. Collects and formats the response
-    4. Handles any markdown or code formatting in the response
+    Updates the active model based on user selection. Returns a response that
+    HTMX will use to update the UI, confirming the model change.
     """
     try:
-        if not message.strip():
+        form = await request.form()
+        model_name = form.get("model")
+        if model_name:
+            global ACTIVE_MODEL
+            ACTIVE_MODEL = model_name
+            return templates.TemplateResponse(
+                "partials/model_status.html",
+                {
+                    "request": request,
+                    "active_model": ACTIVE_MODEL
+                }
+            )
+    except Exception as e:
+        return HTMLResponse(f"Error setting model: {str(e)}", status_code=500)
+
+
+@app.post("/chat")
+async def chat(request: Request):
+    """
+    Handles chat messages by sending them to Ollama and processing the streamed response.
+    The function now properly handles Ollama's streaming response format.
+    """
+    try:
+        # Get the message from form data
+        form = await request.form()
+        message = form.get("message", "")
+        
+        if not message or message.isspace():
             return templates.TemplateResponse(
                 "partials/error.html",
                 {
@@ -97,42 +98,57 @@ async def chat(
                 status_code=400
             )
 
-        # Collect the full response
-        response_text = ""
-        async for chunk in generate_code_response(message):
-            response_text += chunk
-
-        # Clean up the response and format it
-        response_text = response_text.strip()
+        # Initialize response accumulator
+        full_response = ""
         
-        # Return the response
+        # Make request to Ollama
+        async with httpx.AsyncClient() as client:
+            async with client.stream('POST', f"{OLLAMA_BASE_URL}/api/generate", 
+                json={
+                    "model": ACTIVE_MODEL,
+                    "prompt": message,
+                    "stream": True  # Enable streaming
+                }
+            ) as response:
+                # Process the streaming response
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                        
+                    try:
+                        # Parse each line as a separate JSON object
+                        chunk = json.loads(line)
+                        
+                        # Extract the response text from the chunk
+                        if "response" in chunk:
+                            full_response += chunk["response"]
+                            
+                        # Check if this is the final message
+                        if chunk.get("done", False):
+                            break
+                            
+                    except json.JSONDecodeError as e:
+                        print(f"Error parsing chunk: {line}")
+                        print(f"Error details: {str(e)}")
+                        continue
+
+        # Return the complete response
         return templates.TemplateResponse(
             "partials/message.html",
             {
                 "request": request,
-                "message": response_text,
-                "is_code_response": True  # This flag helps our template handle code formatting
+                "message": full_response.strip(),
+                "model": ACTIVE_MODEL
             }
         )
 
     except Exception as e:
+        print(f"Error processing chat: {str(e)}")
         return templates.TemplateResponse(
             "partials/error.html",
             {
                 "request": request,
-                "error": f"Failed to get response: {str(e)}"
+                "error": f"Failed to process message: {str(e)}"
             },
             status_code=500
         )
-
-# Error Handlers
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    return templates.TemplateResponse(
-        "partials/error.html",
-        {
-            "request": request,
-            "error": str(exc)
-        },
-        status_code=500
-    )
