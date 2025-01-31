@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import json
 import logging
 from pathlib import Path
@@ -29,18 +30,15 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 ACTIVE_MODEL = "qwen2.5-coder:7b-instruct-q8_0"
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app:FastAPI):
+    await init_db()
+    yield
+    await close_db()
+
+app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
-
-@app.on_event("startup")
-async def startup():
-    await init_db()
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    await close_db()
 
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
