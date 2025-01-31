@@ -152,3 +152,87 @@ async def chat(request: Request):
             },
             status_code=500
         )
+
+
+@app.get("/select-project")
+async def select_project(request: Request):
+    """
+    Handle the project selection dialog display.
+    Returns the project selection dialog HTML template.
+    """
+    try:
+        # We'll extend this later to include recently used projects
+        # or default paths based on configuration
+        return templates.TemplateResponse(
+            "partials/project_dialog.html",
+            {
+                "request": request,
+            }
+        )
+    except Exception as e:
+        print(f"Error displaying project selection: {e}")
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {
+                "request": request,
+                "error": "Failed to load project selection dialog"
+            },
+            status_code=500
+        )
+
+@app.post("/analyze-project")
+async def analyze_project(request: Request):
+    """
+    Handle project analysis initiation.
+    Takes a repository path and begins the analysis process.
+    """
+    try:
+        form = await request.form()
+        repo_path = form.get("repo_path")
+        
+        if not repo_path:
+            return templates.TemplateResponse(
+                "partials/error.html",
+                {
+                    "request": request,
+                    "error": "Repository path is required"
+                },
+                status_code=400
+            )
+
+        # Initialize Git manager
+        from .git_manager import GitManager
+        git_manager = GitManager(repo_path)
+        
+        if not git_manager.initialize_repo():
+            return templates.TemplateResponse(
+                "partials/error.html",
+                {
+                    "request": request,
+                    "error": "Invalid Git repository path"
+                },
+                status_code=400
+            )
+
+        # Return initial status while analysis continues in background
+        # We'll enhance this with background tasks later
+        return templates.TemplateResponse(
+            "partials/project_status.html",
+            {
+                "request": request,
+                "repo_path": repo_path,
+                "status": "initializing",
+                "message": "Beginning repository analysis..."
+            }
+        )
+
+    except Exception as e:
+        print(f"Error analyzing project: {e}")
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {
+                "request": request,
+                "error": f"Failed to analyze project: {str(e)}"
+            },
+            status_code=500
+        )
