@@ -21,13 +21,12 @@ class GitManager:
         Initialize GitManager with a persistent workspace directory for repositories.
 
 
-        Args:
+            Args:
             workspace_dir: Directory to store repositories. Creates 'repositories' subdirectory.
         """
         base_dir = Path(workspace_dir) if workspace_dir else Path.home() / ".ttlm"
         self.repos_dir = base_dir / "repositories"
         self.repos_dir.mkdir(parents=True, exist_ok=True)
-
         self.repo = None
         self.repo_info = None
 
@@ -65,24 +64,26 @@ class GitManager:
             self.logger.info(f"Starting repository initialization from: {repo_source}")
             repo_name = self.get_repo_name(repo_source)
             is_local = not self.is_git_url(repo_source)
-            self.logger.info(f"Resolved name: {repo_name}, is_local: {is_local}")           
+            self.logger.info(f"Resolved name: {repo_name}, is_local: {is_local}")
             if is_local:
                 repo_path = Path(repo_source).resolve()
                 if not repo_path.exists():
-                    raise RepositoryValidationError(f"Local path does not exist: {repo_source}")
-                    
+                    raise RepositoryValidationError(
+                        f"Local path does not exist: {repo_source}"
+                    )
+
                 # Create symlink in workspace
                 workspace_path = self.repos_dir / repo_path.name
                 if not workspace_path.exists():
                     self.logger.info(f"Creating symlink at: {workspace_path}")
                     os.symlink(repo_path, workspace_path)
-                
+
                 self.repo = Repo(repo_path)
             else:
                 self.logger.info(f"Cloning new repository to: {repo_path}")
                 try:
                     self.repo = Repo.clone_from(repo_source, repo_path)
-                    self.logger.info(f"Clone completed successfully")
+                    self.logger.info("Clone completed successfully")
                 except Exception as e:
                     self.logger.error(f"Clone failed: {str(e)}")
                     raise
